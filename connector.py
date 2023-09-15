@@ -1,5 +1,7 @@
 from pyspark import SparkConf
 
+import json
+
 from pyspark.sql import SparkSession, DataFrame
 
 from pathlib import Path
@@ -19,6 +21,38 @@ from pyspark.sql.types import (
 from pyspark.sql import types as T
 import pyspark.sql.functions as F
 
+import boto3
+from botocore.exceptions import ClientError
+
+def get_secret():
+
+    secret_name = "snowflake/capstone/login"
+    region_name = "eu-west-1"
+
+    # Create a Secrets Manager client
+    session = boto3.session.Session()
+    client = session.client(
+        service_name='secretsmanager',
+        region_name=region_name,
+        #aws_access_key_id="AKIAU5YMQWRQ4TGY2LGK",
+        #aws_secret_access_key="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"
+    )
+
+    try:
+        get_secret_value_response = client.get_secret_value(
+            SecretId=secret_name
+        )
+    except ClientError as e:
+        # For a list of exceptions thrown, see
+        # https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html
+        raise e
+
+    # Decrypts secret using the associated KMS key.
+    secret = get_secret_value_response['SecretString']
+
+    # Your code goes here.
+
+    return secret
 
 def flatten(df):
     complex_fields = dict([
@@ -78,4 +112,17 @@ if __name__ == "__main__":
     df = spark.read.json("s3a://dataminded-academy-capstone-resources/raw/open_aq/")
     df2 = flatten(df)
     df3 = df2.withColumn("date_utc", psf.to_date(psf.col("date_utc"))) 
-    df3.show(5)
+    
+    secret = json.loads(get_secret())
+
+    sfOptions = {
+    "sfURL" : secret["URL"],
+    "sfAccount" : "yw41113",
+    "sfUser" : secret["USER_NAME"],
+    "sfPassword" : secret["PASSWORD"],
+    "sfDatabase" : secret["DATABASE"],
+    "sfSchema" : "THIBAULT",
+    "sfRole" : secret["ROLE"]
+    }
+
+    df3.write.format("snowflake").options(**sfOptions).option("dbtable", "THIBAULTTABLE").mode('append').options(header=True).save()
